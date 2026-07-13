@@ -41,6 +41,7 @@ public class StudentInsightService {
     private final TaskRepository taskRepository;
     private final StudentInsightRepository studentInsightRepository;
     private final GeminiIntegrationService geminiIntegrationService;
+    private final QuizScoreCalculator quizScoreCalculator;
 
     /**
      * Retorna o insight do aluno aplicando a regra de frescor: se o insight salvo
@@ -65,6 +66,24 @@ public class StudentInsightService {
         return toResponse(generated, student);
     }
 
+    /**
+     * Força a regeneração da análise via IA, sobrescrevendo o registro existente
+     * do aluno (upsert). Ignora o cache de 24h.
+     */
+    @Transactional
+    public StudentInsightResponse generateAnalysis(Long studentId) {
+        StudentProfile student = findStudent(studentId);
+
+        StudentInsight existing = studentInsightRepository
+                .findFirstByStudentProfileIdOrderByUpdatedAtDesc(studentId)
+                .orElse(null);
+
+        log.info("[Insight] Refresh forçado da análise do aluno {} (existente={})",
+                studentId, existing != null);
+        StudentInsight updated = generateAndPersist(student, existing);
+        return toResponse(updated, student);
+    }
+
     /** Um insight é considerado "fresco" se foi atualizado nas últimas 24h. */
     private boolean isFresh(StudentInsight insight) {
         return insight.getUpdatedAt() != null
@@ -76,13 +95,25 @@ public class StudentInsightService {
      * (atualiza o registro existente, se houver; senão cria um novo).
      */
     private StudentInsight generateAndPersist(StudentProfile student, StudentInsight existing) {
-        List<Task> recentTasks = taskRepository
-                .findTop5ByStudentsIdAndStatusOrderByDueDateDesc(student.getId(), TaskStatus.CORRIGIDA);
-        StudentProgress progress = studentProgressRepository.findByStudentId(student.getId()).orElse(null);
+        Long studentId = student.getId();
+
+        List<Task> correctedTasks = taskRepository
+                .findByStudentsIdAndStatus(studentId, TaskStatus.CORRIGIDA);
+        ensureScores(correctedTasks);
+
+        List<Task> recentCorrectedTasks = correctedTasks.stream()
+                .sorted((a, b) -> {
+                    if (a.getDueDate() == null && b.getDueDate() == null) return 0;
+                    if (a.getDueDate() == null) return 1;
+                    if (b.getDueDate() == null) return -1;
+                    return b.getDueDate().compareTo(a.getDueDate());
+                })
+                .limit(10)
+                .toList();
 
         String studentName = student.getUser().getName();
-        String recentThemes = buildRecentThemes(recentTasks);
-        String performanceSummary = buildPerformanceSummary(progress, recentTasks);
+        String recentThemes = buildRecentThemes(recentCorrectedTasks);
+        String performanceSummary = buildPerformanceSummary(studentId, recentCorrectedTasks);
 
         GeneratedInsightResponse ai = geminiIntegrationService
                 .generateInsight(studentName, recentThemes, performanceSummary);
@@ -90,13 +121,39 @@ public class StudentInsightService {
         StudentInsight insight = existing != null ? existing : new StudentInsight();
         insight.setStudentProfile(student);
         insight.setAnalysis(ai.analysis());
-        insight.setRecommendations(ai.recommendations() != null ? new ArrayList<>(ai.recommendations()) : new ArrayList<>());
+        if (insight.getRecommendations() == null) {
+            insight.setRecommendations(new ArrayList<>());
+        } else {
+            insight.getRecommendations().clear();
+        }
+        if (ai.recommendations() != null) {
+            insight.getRecommendations().addAll(ai.recommendations());
+        }
         insight.setUpdatedAt(LocalDateTime.now());
 
         return studentInsightRepository.save(insight);
     }
 
-    /** Concatena os temas (título da tarefa + aula) das tarefas recentes. */
+    /**
+     * Preenche {@code score} em tarefas corrigidas que ainda não têm nota,
+     * comparando gabarito e resposta do aluno, e persiste o resultado.
+     */
+    private void ensureScores(List<Task> tasks) {
+        for (Task task : tasks) {
+            if (task.getScore() != null) {
+                continue;
+            }
+            Integer computed = quizScoreCalculator.computeScore(task);
+            if (computed != null) {
+                task.setScore(computed);
+                taskRepository.save(task);
+                log.info("[Insight] Nota retroativa calculada para tarefa {}: {}/10",
+                        task.getId(), computed);
+            }
+        }
+    }
+
+    /** Concatena os temas (título da tarefa + aula) das tarefas recentes corrigidas. */
     private String buildRecentThemes(List<Task> recentTasks) {
         if (recentTasks.isEmpty()) {
             return "";
@@ -110,35 +167,46 @@ public class StudentInsightService {
                 .collect(Collectors.joining("; "));
     }
 
-    /** Monta um resumo textual do desempenho a partir do progresso e das notas recentes. */
-    private String buildPerformanceSummary(StudentProgress progress, List<Task> recentTasks) {
-        String scoresPart = recentTasks.stream()
-                .map(Task::getScore)
-                .filter(java.util.Objects::nonNull)
-                .map(String::valueOf)
-                .collect(Collectors.joining(", "));
-        String averagePart = recentTasks.stream()
-                .map(Task::getScore)
-                .filter(java.util.Objects::nonNull)
-                .mapToInt(Integer::intValue)
-                .average()
-                .stream()
-                .mapToObj(avg -> String.format(" Média das notas recentes: %.1f/10.", avg))
-                .findFirst()
-                .orElse("");
+    /**
+     * Monta o resumo de desempenho com contagens reais e notas por tarefa.
+     */
+    private String buildPerformanceSummary(Long studentId, List<Task> recentCorrectedTasks) {
+        long totalTasks = taskRepository.countByStudentsId(studentId);
+        long correctedTasks = taskRepository.countByStudentsIdAndStatus(studentId, TaskStatus.CORRIGIDA);
+        long pendingTasks = taskRepository.countByStudentsIdAndStatus(studentId, TaskStatus.PENDENTE);
+        long deliveredTasks = taskRepository.countByStudentsIdAndStatus(studentId, TaskStatus.ENTREGUE);
+        long overdueTasks = taskRepository.countByStudentsIdAndStatus(studentId, TaskStatus.ATRASADA);
 
-        String notesPart = scoresPart.isBlank() ? "" : " Notas recentes: " + scoresPart + "." + averagePart;
-
-        if (progress == null) {
-            return "Sem registro de progresso agregado. Tarefas concluídas recentemente: "
-                    + recentTasks.size() + "." + notesPart;
+        StringBuilder notesDetail = new StringBuilder();
+        List<Integer> scores = new ArrayList<>();
+        for (Task task : recentCorrectedTasks) {
+            String title = task.getTitle() != null ? task.getTitle() : "Sem título";
+            if (task.getScore() != null) {
+                scores.add(task.getScore());
+                notesDetail.append("- ").append(title).append(": ").append(task.getScore()).append("/10. ");
+            } else {
+                notesDetail.append("- ").append(title).append(": sem nota registrada. ");
+            }
         }
+
+        String averagePart = "";
+        if (!scores.isEmpty()) {
+            double avg = scores.stream().mapToInt(Integer::intValue).average().orElse(0);
+            averagePart = String.format(" Média das notas: %.1f/10.", avg);
+        }
+
+        String notesPart = recentCorrectedTasks.isEmpty()
+                ? " Nenhuma tarefa corrigida com nota disponível."
+                : " Notas por tarefa (0 a 10): " + notesDetail + averagePart;
+
         return String.format(
-                "Progresso geral: %.1f%%. Tarefas corrigidas: %d. Tarefas pendentes: %d. Concluídas recentemente: %d.%s",
-                progress.getProgressPercentage(),
-                progress.getCorrectedTasks(),
-                progress.getPendingTasks(),
-                recentTasks.size(),
+                "Total de tarefas: %d. Tarefas já corrigidas: %d. Tarefas pendentes: %d. "
+                        + "Tarefas entregues aguardando correção: %d. Tarefas atrasadas: %d.%s",
+                totalTasks,
+                correctedTasks,
+                pendingTasks,
+                deliveredTasks,
+                overdueTasks,
                 notesPart);
     }
 

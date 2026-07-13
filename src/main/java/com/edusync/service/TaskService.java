@@ -39,6 +39,7 @@ public class TaskService {
     private final StudentProfileRepository studentProfileRepository;
     private final TeacherService teacherService;
     private final GeminiIntegrationService geminiIntegrationService;
+    private final QuizScoreCalculator quizScoreCalculator;
 
     /** Gera exercícios via IA (Gemini) para o modal "Nova Tarefa". */
     public GeneratedExerciseResponse generateExercises(ExerciseGenerationRequest request) {
@@ -190,6 +191,12 @@ public class TaskService {
         }
 
         task.setStatus(TaskStatus.CORRIGIDA);
+        Integer computedScore = quizScoreCalculator.computeScore(task);
+        if (computedScore != null) {
+            task.setScore(computedScore);
+            log.info("[TaskService.releaseTaskCorrection] Nota calculada para tarefa {}: {}/10",
+                    task.getId(), computedScore);
+        }
         Task saved = taskRepository.save(task);
 
         StudentProfile student = saved.getStudents().stream().findFirst()
