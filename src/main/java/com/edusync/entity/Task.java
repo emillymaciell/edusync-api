@@ -11,8 +11,8 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Tarefa/exercício vinculado a uma {@link Lesson}. N:1 com Lesson e N:N com
- * {@link StudentProfile} (alunos aos quais a tarefa foi atribuída).
+ * Tarefa/exercício opcionalmente vinculada a uma {@link Lesson}. N:1 opcional com Lesson
+ * e N:N com {@link StudentProfile} (alunos aos quais a tarefa foi atribuída).
  */
 @Entity
 @Table(name = "tasks")
@@ -51,8 +51,9 @@ public class Task {
     /** Nota (0 a 10) atribuída na correção da tarefa; alimenta a análise da IA de insights. */
     private Integer score;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "lesson_id", nullable = false)
+    /** Aula vinculada, quando existir; pode ser null se a tarefa for criada sem aula. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "lesson_id", nullable = true)
     private Lesson lesson;
 
     @ManyToMany(fetch = FetchType.LAZY)

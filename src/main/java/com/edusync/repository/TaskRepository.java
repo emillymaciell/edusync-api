@@ -34,26 +34,24 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             """)
     Optional<Task> findByIdAndStudentProfileUserId(@Param("taskId") Long taskId, @Param("userId") Long userId);
 
-    /** Tarefa do professor com alunos carregados (validação de ownership na correção). */
+    /** Tarefa do professor com alunos carregados (ownership via aluno vinculado). */
     @Query("""
             SELECT t FROM Task t
             JOIN FETCH t.students s
             JOIN FETCH s.user
-            JOIN t.lesson l
-            WHERE t.id = :taskId AND l.teacher.id = :teacherId
+            WHERE t.id = :taskId AND s.teacher.id = :teacherId
             """)
     Optional<Task> findByIdAndLesson_Teacher_Id(@Param("taskId") Long taskId, @Param("teacherId") Long teacherId);
 
     /**
      * Tarefas do professor com alunos e usuários carregados (evita LazyInitialization
-     * com spring.jpa.open-in-view=false).
+     * com spring.jpa.open-in-view=false). Ownership via aluno vinculado à tarefa.
      */
     @Query("""
             SELECT DISTINCT t FROM Task t
             JOIN FETCH t.students s
             JOIN FETCH s.user
-            JOIN t.lesson l
-            WHERE l.teacher.id = :teacherId
+            WHERE s.teacher.id = :teacherId
             ORDER BY t.dueDate DESC
             """)
     List<Task> findByTeacherWithStudents(@Param("teacherId") Long teacherProfileId);
@@ -67,6 +65,12 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
      */
     List<Task> findTop5ByStudentsIdAndStatusOrderByDueDateDesc(Long studentProfileId, TaskStatus status);
 
-    /** Conta tarefas de um professor (via aula) em um dado status. */
-    long countByLesson_Teacher_IdAndStatus(Long teacherProfileId, TaskStatus status);
+    /** Conta tarefas de um professor (via aluno vinculado) em um dado status. */
+    @Query("""
+            SELECT COUNT(DISTINCT t) FROM Task t
+            JOIN t.students s
+            WHERE s.teacher.id = :teacherId AND t.status = :status
+            """)
+    long countByLesson_Teacher_IdAndStatus(@Param("teacherId") Long teacherProfileId,
+                                           @Param("status") TaskStatus status);
 }

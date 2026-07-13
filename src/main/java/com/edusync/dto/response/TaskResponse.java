@@ -24,7 +24,7 @@ public record TaskResponse(
                 t.getDescription(),
                 t.getDueDate(),
                 t.getStatus(),
-                t.getLesson().getId(),
+                t.getLesson() != null ? t.getLesson().getId() : null,
                 t.getStudents().stream().map(s -> s.getId()).collect(Collectors.toSet()),
                 t.getStudentAnswer()
         );

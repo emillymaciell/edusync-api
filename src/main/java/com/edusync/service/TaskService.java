@@ -81,8 +81,7 @@ public class TaskService {
 
             Lesson lesson = lessonRepository
                     .findFirstByTeacherIdAndStudents_IdOrderByScheduledAtDesc(teacher.getId(), student.getId())
-                    .orElseThrow(() -> new BusinessException(
-                            "Nenhuma aula encontrada para vincular a tarefa. Cadastre uma aula com este aluno primeiro."));
+                    .orElse(null);
 
             Task task = Task.builder()
                     .title(request.title())
