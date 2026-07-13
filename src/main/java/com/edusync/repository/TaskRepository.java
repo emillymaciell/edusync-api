@@ -15,6 +15,18 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     List<Task> findByStudentsId(Long studentProfileId);
 
+    long countByStudentsId(Long studentProfileId);
+
+    long countByStudentsIdAndStatus(Long studentProfileId, TaskStatus status);
+
+    @Query("""
+            SELECT COUNT(t) FROM Task t
+            JOIN t.students s
+            WHERE s.id = :studentProfileId AND t.status IN :statuses
+            """)
+    long countByStudentsIdAndStatusIn(@Param("studentProfileId") Long studentProfileId,
+                                      @Param("statuses") List<TaskStatus> statuses);
+
     /** Tarefas atribuídas ao aluno identificado pelo ID do usuário (User.id). */
     @Query("""
             SELECT DISTINCT t FROM Task t

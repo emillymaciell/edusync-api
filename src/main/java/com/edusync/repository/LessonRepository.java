@@ -1,5 +1,6 @@
 package com.edusync.repository;
 
+import com.edusync.domain.enums.LessonStatus;
 import com.edusync.entity.Lesson;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -12,6 +13,10 @@ public interface LessonRepository extends JpaRepository<Lesson, Long> {
     List<Lesson> findByTeacherId(Long teacherProfileId);
 
     List<Lesson> findByStudentsId(Long studentProfileId);
+
+    long countByStudentsId(Long studentProfileId);
+
+    long countByStudentsIdAndStatus(Long studentProfileId, LessonStatus status);
 
     /** Aula mais recente de um professor em que o aluno está matriculado. */
     Optional<Lesson> findFirstByTeacherIdAndStudents_IdOrderByScheduledAtDesc(

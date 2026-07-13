@@ -3,13 +3,16 @@ package com.edusync.controller;
 import com.edusync.dto.request.StudentRequest;
 import com.edusync.dto.request.StudentStatusRequest;
 import com.edusync.dto.response.StudentProfileResponse;
+import com.edusync.dto.response.StudentProgressDTO;
 import com.edusync.security.SecurityUtils;
+import com.edusync.security.UserPrincipal;
 import com.edusync.service.StudentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,7 +20,7 @@ import java.util.List;
 /**
  * Endpoints de alunos.
  * TEACHER: cadastra e gerencia seus alunos.
- * STUDENT: consulta o próprio perfil.
+ * STUDENT: consulta o próprio perfil e progresso.
  */
 @RestController
 @RequestMapping("/api/students")
@@ -41,6 +44,19 @@ public class StudentController {
         return ResponseEntity.ok(studentService.findByTeacher(SecurityUtils.currentUserId()));
     }
 
+    /** Progresso do aluno autenticado (tarefas, aulas, trilha e conquistas). */
+    @GetMapping("/progress")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<StudentProgressDTO> myProgress(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(studentService.getMyProgress(principal.getId()));
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<StudentProfileResponse> myProfile() {
+        return ResponseEntity.ok(studentService.getMyProfile(SecurityUtils.currentUserId()));
+    }
+
     @GetMapping("/{studentProfileId}")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<StudentProfileResponse> findById(@PathVariable Long studentProfileId) {
@@ -52,11 +68,5 @@ public class StudentController {
     public ResponseEntity<StudentProfileResponse> updateStatus(@PathVariable Long studentProfileId,
                                                                @Valid @RequestBody StudentStatusRequest request) {
         return ResponseEntity.ok(studentService.updateStatus(studentProfileId, request.status()));
-    }
-
-    @GetMapping("/me")
-    @PreAuthorize("hasRole('STUDENT')")
-    public ResponseEntity<StudentProfileResponse> myProfile() {
-        return ResponseEntity.ok(studentService.getMyProfile(SecurityUtils.currentUserId()));
     }
 }
