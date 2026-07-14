@@ -134,6 +134,13 @@ public class StudentService {
         int lessonsWatched = (int) lessonRepository.countByStudentsIdAndStatus(
                 studentId, LessonStatus.CONCLUIDA);
 
+        // Demo: valores fictícios de aulas para a Camila Cruz.
+        String email = student.getUser() != null ? student.getUser().getEmail() : null;
+        if (email != null && email.equalsIgnoreCase("camila@gmail.com")) {
+            lessonsWatched = 3;
+            totalLessons = 5;
+        }
+
         int totalModules = LEARNING_TRACK.size();
         int currentModuleIndex = resolveCurrentModuleIndex(student.getLearningLevel());
         int modulesCompleted = currentModuleIndex;
