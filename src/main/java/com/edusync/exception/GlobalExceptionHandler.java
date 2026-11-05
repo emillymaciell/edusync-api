@@ -2,6 +2,7 @@ package com.edusync.exception;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -36,6 +37,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAi(AiIntegrationException ex) {
         log.error("Falha na integração com IA", ex);
         return build(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    /** Cota da demonstração esgotada. Não registra IP nem corpo da requisição. */
+    @ExceptionHandler(DemoRateLimitException.class)
+    public ResponseEntity<ApiError> handleDemoRateLimit(DemoRateLimitException ex) {
+        log.warn("Limite de gerações da demonstração atingido");
+        ApiError body = ApiError.of(HttpStatus.TOO_MANY_REQUESTS.value(),
+                HttpStatus.TOO_MANY_REQUESTS.getReasonPhrase(),
+                ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(ex.getRetryAfterSeconds()))
+                .body(body);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
